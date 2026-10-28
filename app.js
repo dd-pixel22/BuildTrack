@@ -554,7 +554,7 @@ function cartHTML() {
   const items = cart.map(item => ({ ...item, product: products.find(p => p.id === item.id) })).filter(item => item.product);
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.qty, 0);
   return `<main class="container page-shell">
-    <section class="page-heading"><span class="eyebrow">Your selection</span><h1>Shopping cart.</h1><p>Review your material selection before placing a demo order.</p></section>
+    <section class="page-heading"><span class="eyebrow">Your selection</span><h1>Shopping cart.</h1><p> before placing a demo order.</p></section>
     ${items.length ? `<div class="cart-layout">
       <section class="panel"><div class="panel-head"><h3>Selected materials (${cartCount()})</h3><button class="btn btn-light btn-sm" data-action="clear-cart">Clear cart</button></div>
         ${items.map(item => `<div class="cart-item">
@@ -571,7 +571,7 @@ function cartHTML() {
         <div class="summary-line"><span>Taxes</span><span>Not included</span></div>
         <div class="summary-line total"><span>Estimated total</span><span>${money(subtotal)}</span></div>
         <p class="muted small">This demo does not process real payments.</p>
-        <button class="btn btn-primary btn-block" data-action="checkout">Place demo order →</button>
+        <button class="btn btn-primary btn-block" data-action="checkout"> →</button>
         <button class="btn btn-light btn-block" data-action="navigate" data-view="catalogue">Continue shopping</button>
       </aside>
     </div>` : `<div class="panel empty-state"><div class="empty-icon">♧</div><h3>Your cart is waiting.</h3><p>Explore the catalogue and add materials to begin your order.</p><button class="btn btn-primary" data-action="navigate" data-view="catalogue">Explore materials →</button></div>`}
