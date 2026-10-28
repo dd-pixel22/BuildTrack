@@ -102,6 +102,7 @@ async function refreshSuppliersFromAPI() {
   }
 }
 
+
 async function refreshOrdersFromAPI() {
   if (!getSession()?.token) return;
 
@@ -110,12 +111,33 @@ async function refreshOrdersFromAPI() {
     const orders = Array.isArray(result) ? result : result.orders;
 
     if (Array.isArray(orders)) {
-      writeStore(STORAGE.orders, orders);
+      const normalizedOrders = orders.map(order => ({
+        ...order,
+        id: String(order.id ?? ""),
+        customerName: order.customerName || order.customer || "Customer",
+        customerEmail: order.customerEmail || order.email || "",
+        date: order.date
+          ? new Date(order.date).toLocaleString("en-IN")
+          : "",
+        total: Number(order.total) || 0,
+        items: Array.isArray(order.items)
+          ? order.items.map(item => ({
+              ...item,
+              id: String(item.id ?? item.sku ?? ""),
+              name: item.name || item.product_name || "Material",
+              qty: Number(item.qty ?? item.quantity) || 0,
+              price: Number(item.price ?? item.unit_price) || 0
+            }))
+          : []
+      }));
+
+      writeStore(STORAGE.orders, normalizedOrders);
     }
   } catch (error) {
     console.error("Could not load orders from the database:", error);
   }
 }
+
 
 const imageURL = (photo, width = 700) =>
   `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=${width}&q=80`;
