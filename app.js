@@ -6,7 +6,7 @@
    Do not use this localStorage demo for real customer passwords.
 */
 
-const STORAGE = {
+const STORAGE = { 
   products: "buildtrack_products_v1",
   suppliers: "buildtrack_suppliers_v1",
   users: "buildtrack_users_v1",
