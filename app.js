@@ -269,8 +269,26 @@ const getOrders = () => readStore(STORAGE.orders, []);
 const saveOrders = value => writeStore(STORAGE.orders, value);
 const getCart = () => readStore(STORAGE.cart, []);
 const saveCart = value => writeStore(STORAGE.cart, value);
-const getSession = () => readStore(STORAGE.session, null);
-const setSession = value => writeStore(STORAGE.session, value);
+const getSession = () => {
+  try {
+    const session = sessionStorage.getItem(STORAGE.session);
+    return session ? JSON.parse(session) : null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const setSession = value => {
+  try {
+    if (value === null || value === undefined) {
+      sessionStorage.removeItem(STORAGE.session);
+    } else {
+      sessionStorage.setItem(STORAGE.session, JSON.stringify(value));
+    }
+  } catch (error) {
+    console.error("Could not save login session:", error);
+  }
+};
 
 let authMode = "login";
 let authRole = "customer";
