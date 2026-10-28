@@ -6,13 +6,16 @@
    Do not use this localStorage demo for real customer passwords.
 */
 
-const STORAGE = { 
+const API_BASE = "https://buildtrack-backend-02wf.onrender.com/api";
+
+const STORAGE = {
   products: "buildtrack_products_v1",
   suppliers: "buildtrack_suppliers_v1",
   users: "buildtrack_users_v1",
   orders: "buildtrack_orders_v1",
   session: "buildtrack_session_v1",
-  cart: "buildtrack_cart_v1"
+  cart: "buildtrack_cart_v1",
+  view: "buildtrack_current_view_v1"
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -25,6 +28,94 @@ const money = value => new Intl.NumberFormat("en-IN", {
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[char]);
+
+async function apiRequest(path, options = {}) {
+  const session = getSession();
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+
+  if (session?.token) {
+    headers.Authorization = `Bearer ${session.token}`;
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      result.message || result.error || `Request failed (${response.status})`
+    );
+  }
+
+  return result;
+}
+
+function saveCurrentView(view) {
+  currentView = view || "home";
+  writeStore(STORAGE.view, currentView);
+}
+
+async function refreshProductsFromAPI() {
+  try {
+    const result = await apiRequest("/products");
+    const products = Array.isArray(result) ? result : result.products;
+
+    if (Array.isArray(products)) {
+      const existing = getProducts();
+
+      writeStore(STORAGE.products, products.map(p => {
+        const old = existing.find(x =>
+          String(x.id) === String(p.id) ||
+          String(x.databaseId) === String(p.databaseId)
+        );
+
+        return {
+          ...old,
+          ...p,
+          id: String(p.id),
+          active: p.active !== false
+        };
+      }));
+    }
+  } catch (error) {
+    console.error("Could not load products from the database:", error);
+  }
+}
+
+async function refreshSuppliersFromAPI() {
+  try {
+    const result = await apiRequest("/suppliers");
+    const suppliers = Array.isArray(result) ? result : result.suppliers;
+
+    if (Array.isArray(suppliers)) {
+      writeStore(STORAGE.suppliers, suppliers);
+    }
+  } catch (error) {
+    console.error("Could not load suppliers from the database:", error);
+  }
+}
+
+async function refreshOrdersFromAPI() {
+  if (!getSession()?.token) return;
+
+  try {
+    const result = await apiRequest("/orders");
+    const orders = Array.isArray(result) ? result : result.orders;
+
+    if (Array.isArray(orders)) {
+      writeStore(STORAGE.orders, orders);
+    }
+  } catch (error) {
+    console.error("Could not load orders from the database:", error);
+  }
+}
 
 const imageURL = (photo, width = 700) =>
   `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=${width}&q=80`;
@@ -161,7 +252,7 @@ const setSession = value => writeStore(STORAGE.session, value);
 
 let authMode = "login";
 let authRole = "customer";
-let currentView = "home";
+let currentView = readStore(STORAGE.view, "home");
 let currentCategory = "All";
 let searchTerm = "";
 let sortMode = "featured";
@@ -654,49 +745,111 @@ function navigate(view) {
   if (user?.role === "admin") {
     adminTab = view === "home" ? "overview" : view;
   } else {
-    currentView = view || "home";
+    saveCurrentView(view);
   }
   renderApp();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function signIn(email, password) {
+async function signIn(email, password) {
   email = email.trim().toLowerCase();
-  if (authRole === "admin") {
-    if (email === "admin@buildtrack.demo" && password === "Admin123") {
-      setSession({ name: "BuildTrack Admin", email, role: "admin" });
-      adminTab = "overview";
-      renderApp();
-      toast("Welcome to the admin workspace.");
+
+  try {
+    const result = await apiRequest("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    });
+
+    const user = result.user;
+
+    if (!user || !result.token) {
+      toast("Login failed. Please try again.");
       return;
     }
-    toast("For the demo, use admin@buildtrack.demo and Admin123.");
-    return;
+
+    if (authRole === "admin" && user.role !== "admin") {
+      toast("This account does not have administrator access.");
+      return;
+    }
+
+    if (authRole !== "admin" && user.role !== "customer") {
+      toast("Please use the correct login option for your account.");
+      return;
+    }
+
+    setSession({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      token: result.token
+    });
+     await refreshOrdersFromAPI();
+
+    if (user.role === "admin") {
+      adminTab = "overview";
+    } else {
+      saveCurrentView("home");
+    }
+     
+    renderApp();
+    toast(
+      user.role === "admin"
+        ? "Welcome to the admin workspace."
+        : `Welcome back, ${user.name.split(" ")[0]}!`
+    );
+
+  } catch (error) {
+    toast(error.message || "Login failed. Please check your details.");
   }
-  const user = getUsers().find(u => u.email === email && u.role === "customer" && u.password === password);
-  if (!user) {
-    toast("Account not found. Register first or check your details.");
-    return;
-  }
-  setSession({ name: user.name, email: user.email, role: "customer" });
-  currentView = "home";
-  renderApp();
-  toast(`Welcome back, ${user.name.split(" ")[0]}!`);
 }
 
-function registerCustomer(name, email, password) {
+
+
+async function registerCustomer(name, email, password) {
   name = name.trim();
   email = email.trim().toLowerCase();
-  if (name.length < 2) return toast("Please enter your full name.");
-  if (password.length < 8) return toast("Password must contain at least 8 characters.");
-  if (getUsers().some(u => u.email === email)) return toast("An account with that email already exists.");
-  const user = { id: `CUS${Date.now()}`, name, email, password, role: "customer" };
-  saveUsers([...getUsers(), user]);
-  setSession({ name, email, role: "customer" });
-  currentView = "home";
-  renderApp();
-  toast("Demo account created successfully.");
+
+  if (name.length < 2) {
+    toast("Please enter your full name.");
+    return;
+  }
+
+  if (password.length < 8) {
+    toast("Password must contain at least 8 characters.");
+    return;
+  }
+
+  try {
+    const result = await apiRequest("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password })
+    });
+
+    const user = result.user;
+
+    if (!user || !result.token) {
+      toast("Registration failed. Please try again.");
+      return;
+    }
+
+    setSession({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      token: result.token
+    });
+
+    saveCurrentView("home");
+    renderApp();
+    toast("Your BuildTrack account was created successfully!");
+
+  } catch (error) {
+    toast(error.message || "Registration failed. Please try again.");
+  }
 }
+
 
 function addToCart(id) {
   const product = getProducts().find(p => p.id === id);
@@ -732,42 +885,51 @@ function updateCartQty(id, delta) {
   renderApp();
 }
 
-function placeOrder() {
+
+async function placeOrder() {
   const user = getSession();
-  if (!user || user.role !== "customer") return toast("Please sign in as a customer.");
+
+  if (!user || user.role !== "customer") {
+    return toast("Please sign in as a customer.");
+  }
+
   const cart = getCart();
-  if (!cart.length) return toast("Your cart is empty.");
+
+  if (!cart.length) {
+    return toast("Your cart is empty.");
+  }
+
   const products = getProducts();
+
   for (const item of cart) {
-    const product = products.find(p => p.id === item.id);
+    const product = products.find(p => String(p.id) === String(item.id));
+
     if (!product || product.stock < item.qty) {
-      return toast("Stock changed for an item. Please review your cart.");
+      return toast("Stock changed. Please review your cart.");
     }
   }
-  const items = cart.map(item => {
-    const p = products.find(product => product.id === item.id);
-    return { id: p.id, name: p.name, price: p.price, qty: item.qty, unit: p.unit };
-  });
-  const total = items.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const order = {
-    id: `BT-${Date.now().toString().slice(-8)}`,
-    customerName: user.name,
-    customerEmail: user.email,
-    items,
-    total,
-    status: "Pending",
-    date: new Date().toLocaleDateString("en-IN")
-  };
-  items.forEach(item => {
-    const product = products.find(p => p.id === item.id);
-    product.stock -= item.qty;
-  });
-  saveProducts(products);
-  saveOrders([...getOrders(), order]);
-  saveCart([]);
-  currentView = "orders";
-  renderApp();
-  toast(`Order ${order.id} placed in demo mode.`);
+
+  try {
+    const result = await apiRequest("/orders", {
+      method: "POST",
+      body: JSON.stringify({
+        items: cart.map(item => ({
+          id: item.id,
+          qty: item.qty
+        }))
+      })
+    });
+
+    await refreshOrdersFromAPI();
+
+    saveCart([]);
+    saveCurrentView("orders");
+    renderApp();
+
+    toast(`Order ${result.id || ""} placed successfully!`);
+  } catch (error) {
+    toast(error.message || "Could not place your order. Please try again.");
+  }
 }
 
 function showModal(title, subtitle, body) {
@@ -894,7 +1056,7 @@ function exportCSV(type) {
   toast("CSV export prepared.");
 }
 
-document.addEventListener("submit", event => {
+document.addEventListener("submit", async event => {
   const form = event.target;
   if (!form.matches("form")) return;
   event.preventDefault();
@@ -959,13 +1121,32 @@ document.addEventListener("submit", event => {
   }
 
   if (form.id === "order-status-form") {
-    const id = form.dataset.id;
-    const status = String(data.get("status"));
-    saveOrders(getOrders().map(o => o.id === id ? { ...o, status } : o));
+  const id = form.dataset.id;
+  const status = String(data.get("status"));
+  const order = getOrders().find(o => String(o.id) === String(id));
+
+  if (!order) {
+    toast("Order not found. Please refresh and try again.");
+    return;
+  }
+
+  try {
+    await apiRequest(
+      `/orders/${encodeURIComponent(order.databaseId || order.id)}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status })
+      }
+    );
+
+    await refreshOrdersFromAPI();
     closeModal();
     renderApp();
-    toast("Order status updated.");
+    toast("Order status updated successfully.");
+  } catch (error) {
+    toast(error.message || "Could not update order status.");
   }
+}
 });
 
 document.addEventListener("input", event => {
@@ -1088,9 +1269,16 @@ document.addEventListener("click", event => {
   if (action === "backdrop-close" && event.target === button) closeModal();
 });
 
-function initBuildTrack() {
+
+async function initBuildTrack() {
   seedData();
+
+  await refreshProductsFromAPI();
+  await refreshSuppliersFromAPI();
+  await refreshOrdersFromAPI();
+
   renderApp();
 }
 
 initBuildTrack();
+
